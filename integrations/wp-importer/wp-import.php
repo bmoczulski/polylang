@@ -184,6 +184,7 @@ class PLL_WP_Import extends WP_Import {
 		global $wpdb;
 
 		$u = array();
+		$r = array();
 
 		foreach ( $terms as $term ) {
 			$translations = maybe_unserialize( $term['term_description'] );
@@ -198,6 +199,22 @@ class PLL_WP_Import extends WP_Import {
 			if ( ! empty( $new_translations ) ) {
 				$u['case'][] = $wpdb->prepare( 'WHEN %d THEN %s', $this->processed_terms[ $term['term_id'] ], maybe_serialize( $new_translations ) );
 				$u['in'][] = (int) $this->processed_terms[ $term['term_id'] ];
+
+				$current_taxonomy = $wpdb->prepare('%s', $term['term_taxonomy']);
+				$current_processed_term_id = (int) $this->processed_terms[ $term['term_id'] ];
+				$current_processed_object_ids = implode(', ', array_map('intval', array_values($new_translations)));
+
+				// select all term_taxonomy_id in taxonomy 'term_translations'
+				// linked to any of the current processed objects
+				// but not the current processed term_id
+
+				// remove single-default-language term/post_translations created by hooks for new terms/posts
+				$r = array_merge($r, $wpdb->get_results(
+					"SELECT tt.term_taxonomy_id, tt.term_id FROM {$wpdb->term_taxonomy} AS tt 
+					INNER JOIN {$wpdb->term_relationships} AS tr ON tt.term_taxonomy_id = tr.term_taxonomy_id
+					WHERE tt.taxonomy = $current_taxonomy
+					AND tr.object_id IN ($current_processed_object_ids)
+					AND tt.term_id != $current_processed_term_id"));
 			}
 		}
 
@@ -209,6 +226,14 @@ class PLL_WP_Import extends WP_Import {
 				WHERE term_id IN ( ' . implode( ',', $u['in'] ) . ' )'
 			);
 			// PHPCS:enable
+
+			if ( ! empty( $r ) ) {
+				$term_taxonomy_ids = implode(', ', array_map('intval', array_column($r, 'term_taxonomy_id')));
+				$term_ids = implode(', ', array_map('intval', array_column($r, 'term_id')));
+				$wpdb->query("DELETE FROM {$wpdb->term_taxonomy} WHERE term_taxonomy_id IN ($term_taxonomy_ids)");
+				$wpdb->query("DELETE FROM {$wpdb->term_relationships} WHERE term_taxonomy_id IN ($term_taxonomy_ids)");
+				$wpdb->query("DELETE FROM {$wpdb->terms} WHERE term_id IN ($term_ids)");
+			}
 		}
 	}
 }
