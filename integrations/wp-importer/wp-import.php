@@ -122,6 +122,8 @@ class PLL_WP_Import extends WP_Import {
 		global $wpdb;
 
 		$trs = array();
+		$invalid_defaults = array();
+		$default_lang = PLL()->pref_lang;
 
 		foreach ( $terms as $term ) {
 			$translations = maybe_unserialize( $term['term_description'] );
@@ -130,10 +132,20 @@ class PLL_WP_Import extends WP_Import {
 					// Language relationship
 					$trs[] = $wpdb->prepare( '( %d, %d )', $this->processed_terms[ $old_id ], $lang->tl_term_taxonomy_id );
 
+					// Invalid default language relationship
+					if ( $default_lang && $lang->tl_term_taxonomy_id != $default_lang->tl_term_taxonomy_id ) {
+						$invalid_defaults[] = $wpdb->prepare( '(object_id = %d AND term_taxonomy_id = %d)', $this->processed_terms[ $old_id ], $default_lang->tl_term_taxonomy_id );
+					}
+
 					// Translation relationship
 					$trs[] = $wpdb->prepare( '( %d, %d )', $this->processed_terms[ $old_id ], get_term( $this->processed_terms[ $term['term_id'] ], 'term_translations' )->term_taxonomy_id );
 				}
 			}
+		}
+
+		// First remove invalid default language relationships created by PLL_CRUD_Terms::save_term() hook
+		if ( ! empty( $invalid_defaults ) ) {
+			$wpdb->query( "DELETE FROM {$wpdb->term_relationships} WHERE " . implode( " OR ", $invalid_defaults ) );
 		}
 
 		// Insert term_relationships
